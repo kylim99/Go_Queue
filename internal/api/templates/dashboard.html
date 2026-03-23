@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoQueue Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; color: #333; padding: 2rem; }
+        h1 { margin-bottom: 1.5rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 150px; }
+        .stat-card h3 { font-size: 0.875rem; color: #666; text-transform: uppercase; }
+        .stat-card .value { font-size: 2rem; font-weight: bold; margin-top: 0.5rem; }
+        table { width: 100%; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-collapse: collapse; }
+        th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-size: 0.875rem; text-transform: uppercase; color: #666; }
+        .status { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-running { background: #dbeafe; color: #1e40af; }
+        .status-completed { background: #d1fae5; color: #065f46; }
+        .status-failed { background: #fee2e2; color: #991b1b; }
+        .status-dead { background: #f3f4f6; color: #374151; }
+        .status-retrying { background: #fde68a; color: #92400e; }
+        .status-cancelled { background: #e5e7eb; color: #6b7280; }
+        .status-scheduled { background: #e0e7ff; color: #3730a3; }
+        .refresh { margin-bottom: 1rem; color: #666; font-size: 0.875rem; }
+        .create-form { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 2rem; }
+        .create-form h2 { font-size: 1.125rem; margin-bottom: 1rem; }
+        .form-row { display: flex; gap: 1rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+        .form-group { display: flex; flex-direction: column; min-width: 150px; flex: 1; }
+        .form-group label { font-size: 0.75rem; color: #666; text-transform: uppercase; margin-bottom: 0.25rem; }
+        .form-group input, .form-group textarea { padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.875rem; font-family: inherit; }
+        .form-group textarea { resize: vertical; min-height: 60px; }
+        .btn { padding: 0.5rem 1.5rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+        .btn:hover { background: #1d4ed8; }
+        .toast { position: fixed; top: 1rem; right: 1rem; padding: 0.75rem 1.25rem; border-radius: 6px; font-size: 0.875rem; font-weight: 500; display: none; z-index: 100; }
+        .toast-success { background: #d1fae5; color: #065f46; }
+        .toast-error { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body>
+    <h1>GoQueue Dashboard</h1>
+    <p class="refresh">Auto-refreshes every 5 seconds</p>
+
+    <div id="toast" class="toast"></div>
+
+    <div class="create-form">
+        <h2>Create Job</h2>
+        <form id="createJobForm">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Queue</label>
+                    <input type="text" id="queue" value="default" required>
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <input type="text" id="type" placeholder="e.g. send_email" required>
+                </div>
+                <div class="form-group">
+                    <label>Max Retries</label>
+                    <input type="number" id="maxRetries" value="3" min="0">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Payload (JSON)</label>
+                    <textarea id="payload" placeholder='{"key": "value"}'>{}</textarea>
+                </div>
+            </div>
+            <button type="submit" class="btn">Create Job</button>
+        </form>
+    </div>
+
+    <div class="stats">
+        {{range $status, $count := .Stats}}
+        <div class="stat-card">
+            <h3>{{$status}}</h3>
+            <div class="value">{{$count}}</div>
+        </div>
+        {{end}}
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Queue</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Retries</th>
+                <th>Created</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Jobs}}
+            <tr>
+                <td>{{.ID}}</td>
+                <td>{{.Queue}}</td>
+                <td>{{.Type}}</td>
+                <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
+                <td>{{.RetryCount}}/{{.MaxRetries}}</td>
+                <td>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+                <td>{{.Error}}</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+
+    <script>
+        const API_KEY = "{{.APIKey}}";
+
+        function showToast(msg, type) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast toast-' + type;
+            t.style.display = 'block';
+            setTimeout(() => t.style.display = 'none', 3000);
+        }
+
+        document.getElementById('createJobForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const queue = document.getElementById('queue').value;
+            const type = document.getElementById('type').value;
+            const maxRetries = parseInt(document.getElementById('maxRetries').value);
+            let payload;
+            try {
+                payload = JSON.parse(document.getElementById('payload').value);
+            } catch {
+                showToast('Invalid JSON payload', 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/v1/jobs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+                    body: JSON.stringify({ queue, type, payload, max_retries: maxRetries })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast('Job created: ' + data.id, 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showToast('Error: ' + data.error, 'error');
+                }
+            } catch (err) {
+                showToast('Request failed: ' + err.message, 'error');
+            }
+        });
+
+        setTimeout(() => location.reload(), 5000);
+    </script>
+</body>
+</html>
