@@ -38,6 +38,7 @@ type PostgresStorage struct {
 	connStr string
 }
 
+// NewPostgresStorage는 PostgreSQL 연결 풀을 생성하고 연결을 확인한 후 스토리지 인스턴스를 반환한다.
 func NewPostgresStorage(ctx context.Context, connStr string) (*PostgresStorage, error) {
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
@@ -64,10 +65,17 @@ func (s *PostgresStorage) RunMigrations() error {
 	return nil
 }
 
+// Pool은 DB 커넥션 풀 통계 수집을 위해 pgxpool.Pool을 반환한다.
+func (s *PostgresStorage) Pool() *pgxpool.Pool {
+	return s.pool
+}
+
+// Close는 PostgreSQL 연결 풀을 닫고 모든 커넥션을 해제한다.
 func (s *PostgresStorage) Close() {
 	s.pool.Close()
 }
 
+// CreateJob은 새로운 작업을 PostgreSQL에 저장하고 생성된 작업 정보를 반환한다.
 func (s *PostgresStorage) CreateJob(ctx context.Context, job *model.Job) (*model.Job, error) {
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO jobs (queue, type, payload, status, max_retries, retry_count, run_at)
@@ -79,6 +87,7 @@ func (s *PostgresStorage) CreateJob(ctx context.Context, job *model.Job) (*model
 	return scanJob(row)
 }
 
+// GetJob은 ID로 작업을 조회하여 반환한다.
 func (s *PostgresStorage) GetJob(ctx context.Context, id uuid.UUID) (*model.Job, error) {
 	row := s.pool.QueryRow(ctx,
 		`SELECT id, queue, type, payload, status, max_retries, retry_count,
@@ -88,6 +97,7 @@ func (s *PostgresStorage) GetJob(ctx context.Context, id uuid.UUID) (*model.Job,
 	return scanJob(row)
 }
 
+// UpdateJobStatus는 작업의 상태를 변경하고, running/completed 전환 시 시간 정보를 기록한다.
 func (s *PostgresStorage) UpdateJobStatus(ctx context.Context, id uuid.UUID, status model.JobStatus) error {
 	now := time.Now()
 	var startedAt, completedAt *time.Time

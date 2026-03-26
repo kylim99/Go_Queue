@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/goqueue/internal/api"
 	"github.com/goqueue/internal/config"
+	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/queue"
 	"github.com/goqueue/internal/scheduler"
 	"github.com/goqueue/internal/storage"
@@ -62,11 +64,50 @@ func main() {
 	// Register job handlers here. Example:
 	// registry.Register("send_email", emailHandler)
 
+	queues := []string{"default", "email"}
+
 	pool := worker.NewPool(store, rq, registry, cfg.WorkerCount, cfg.JobTimeout, logger)
-	pool.Start(ctx, []string{"default", "email"})
+	pool.Start(ctx, queues)
 
 	sched := scheduler.New(store, rq, cfg.JobTimeout, logger)
 	sched.Start(ctx)
+
+	// DB 커넥션 풀 메트릭 수집 고루틴 시작
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				stat := store.Pool().Stat()
+				metrics.DBPoolAcquired.Set(float64(stat.AcquiredConns()))
+				metrics.DBPoolIdle.Set(float64(stat.IdleConns()))
+				metrics.DBPoolMax.Set(float64(stat.MaxConns()))
+				metrics.DBPoolTotal.Set(float64(stat.TotalConns()))
+			}
+		}
+	}()
+
+	// 큐 깊이 메트릭 수집 고루틴 시작
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				for _, q := range queues {
+					length, err := rq.QueueLength(ctx, q)
+					if err == nil {
+						metrics.QueueDepth.WithLabelValues(q).Set(float64(length))
+					}
+				}
+			}
+		}
+	}()
 
 	router := api.NewRouter(store, rq, cfg.APIKey, logger)
 

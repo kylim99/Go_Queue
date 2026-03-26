@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/model"
 	"github.com/goqueue/internal/queue"
 	"github.com/goqueue/internal/storage"
@@ -28,10 +29,14 @@ func New(store *storage.PostgresStorage, q *queue.RedisQueue, jobTimeout time.Du
 	}
 }
 
+// Start는 스케줄러의 세 가지 백그라운드 루프를 시작한다.
+// 1) 예약된 작업 처리 2) 미큐잉 작업 복구 3) 정체된(stale) 작업 복구
 func (s *Scheduler) Start(ctx context.Context) {
 	go s.runScheduledLoop(ctx)
 	go s.runRecoveryLoop(ctx)
 	go s.runStaleCheckLoop(ctx)
+	// 스케줄러 활성 상태 메트릭 설정
+	metrics.SchedulerActive.Set(1)
 	s.logger.Info("scheduler started")
 }
 
@@ -49,6 +54,7 @@ func (s *Scheduler) runScheduledLoop(ctx context.Context) {
 	}
 }
 
+// processScheduledJobs는 실행 시간이 도래한 예약 작업을 Redis에서 가져와 해당 큐에 넣는다.
 func (s *Scheduler) processScheduledJobs(ctx context.Context) {
 	dueJobIDs, err := s.queue.GetDueJobs(ctx, time.Now())
 	if err != nil {
@@ -96,6 +102,7 @@ func (s *Scheduler) runRecoveryLoop(ctx context.Context) {
 	}
 }
 
+// recoverUnqueuedJobs는 pending 상태이지만 큐에 들어가지 않은 작업을 찾아 다시 큐에 넣는다.
 func (s *Scheduler) recoverUnqueuedJobs(ctx context.Context) {
 	jobs, err := s.store.GetPendingUnqueued(ctx, 5*time.Second)
 	if err != nil {
@@ -126,6 +133,7 @@ func (s *Scheduler) runStaleCheckLoop(ctx context.Context) {
 	}
 }
 
+// recoverStaleJobs는 실행 시간이 초과된 정체(stale) 작업을 찾아 실패 처리한다.
 func (s *Scheduler) recoverStaleJobs(ctx context.Context) {
 	jobs, err := s.store.GetStaleRunningJobs(ctx, s.jobTimeout)
 	if err != nil {

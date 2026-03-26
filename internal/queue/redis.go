@@ -23,6 +23,7 @@ type RedisQueue struct {
 	client *redis.Client
 }
 
+// NewRedisQueue는 Redis에 연결하고 큐 인스턴스를 생성한다.
 func NewRedisQueue(ctx context.Context, addr string) (*RedisQueue, error) {
 	client := redis.NewClient(&redis.Options{Addr: addr})
 	if err := client.Ping(ctx).Err(); err != nil {
@@ -35,10 +36,16 @@ func (q *RedisQueue) Close() {
 	q.client.Close()
 }
 
+// QueueLength는 지정된 큐의 현재 대기 작업 수를 반환한다.
+func (q *RedisQueue) QueueLength(ctx context.Context, queueName string) (int64, error) {
+	return q.client.LLen(ctx, queueKey(queueName)).Result()
+}
+
 func queueKey(queue string) string {
 	return "goqueue:queue:" + queue
 }
 
+// Push는 작업 ID를 지정된 큐의 왼쪽에 추가한다 (LPUSH).
 func (q *RedisQueue) Push(ctx context.Context, queue string, jobID string) error {
 	return q.client.LPush(ctx, queueKey(queue), jobID).Err()
 }
@@ -61,6 +68,7 @@ func (q *RedisQueue) Pop(ctx context.Context, queues []string, timeout time.Dura
 	return result[1], nil
 }
 
+// Schedule은 작업을 지정된 실행 시간에 예약한다 (Redis Sorted Set 사용).
 func (q *RedisQueue) Schedule(ctx context.Context, jobID string, runAt time.Time) error {
 	return q.client.ZAdd(ctx, scheduledSetKey, redis.Z{
 		Score:  float64(runAt.Unix()),
@@ -68,7 +76,7 @@ func (q *RedisQueue) Schedule(ctx context.Context, jobID string, runAt time.Time
 	}).Err()
 }
 
-// GetDueJobs atomically retrieves and removes jobs whose run_at has passed.
+// GetDueJobs는 실행 시간이 도래한 예약 작업을 원자적으로 조회하고 제거한다.
 func (q *RedisQueue) GetDueJobs(ctx context.Context, now time.Time) ([]string, error) {
 	max := fmt.Sprintf("%d", now.Unix())
 	result, err := getDueJobsScript.Run(ctx, q.client, []string{scheduledSetKey}, max).StringSlice()

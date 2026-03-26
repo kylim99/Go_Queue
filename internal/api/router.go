@@ -5,7 +5,9 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/queue"
 	"github.com/goqueue/internal/storage"
 )
@@ -15,6 +17,12 @@ func NewRouter(store *storage.PostgresStorage, q *queue.RedisQueue, apiKey strin
 	r := chi.NewRouter()
 
 	r.Use(RequestLogger(logger))
+
+	// Prometheus 메트릭 엔드포인트 (인증 불필요)
+	r.Handle("/metrics", promhttp.HandlerFor(
+		metrics.Registry,
+		promhttp.HandlerOpts{EnableOpenMetrics: true},
+	))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(APIKeyAuth(apiKey))

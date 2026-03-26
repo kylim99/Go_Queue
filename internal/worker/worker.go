@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/model"
 	"github.com/goqueue/internal/queue"
 	"github.com/goqueue/internal/storage"
@@ -110,7 +111,13 @@ func (p *Pool) worker(ctx context.Context, id int) {
 	}
 }
 
+// processJob은 큐에서 가져온 작업을 실행하고, 성공/실패에 따라 상태를 업데이트한다.
+// 활성 워커 수, 처리 시간, 성공/실패 카운터 등 Prometheus 메트릭을 기록한다.
 func (p *Pool) processJob(ctx context.Context, logger *slog.Logger, jobIDStr string) {
+	// 활성 워커 수 추적 (작업 시작 시 증가, 종료 시 감소)
+	metrics.ActiveWorkers.Inc()
+	defer metrics.ActiveWorkers.Dec()
+
 	jobID, err := uuid.Parse(jobIDStr)
 	if err != nil {
 		logger.Error("invalid job ID", "id", jobIDStr, "error", err)
@@ -140,11 +147,22 @@ func (p *Pool) processJob(ctx context.Context, logger *slog.Logger, jobIDStr str
 
 	logger.Info("processing job", "id", jobID, "type", job.Type, "queue", job.Queue)
 
+	// 작업 처리 시간 측정 시작
+	start := time.Now()
+
 	if err := handler(jobCtx, job.Payload); err != nil {
 		logger.Error("job failed", "id", jobID, "error", err)
+		// 실패한 작업의 처리 시간 및 에러 메트릭 기록
+		metrics.JobDuration.WithLabelValues(job.Type).Observe(time.Since(start).Seconds())
+		metrics.JobsProcessed.WithLabelValues(job.Type, "failed").Inc()
+		metrics.ErrorsTotal.WithLabelValues(job.Type).Inc()
 		p.handleFailure(ctx, job, err)
 		return
 	}
+
+	// 성공한 작업의 처리 시간 및 완료 메트릭 기록
+	metrics.JobDuration.WithLabelValues(job.Type).Observe(time.Since(start).Seconds())
+	metrics.JobsProcessed.WithLabelValues(job.Type, "success").Inc()
 
 	if err := p.store.UpdateJobStatus(ctx, jobID, model.StatusCompleted); err != nil {
 		logger.Error("update status to completed failed", "id", jobID, "error", err)
@@ -152,6 +170,8 @@ func (p *Pool) processJob(ctx context.Context, logger *slog.Logger, jobIDStr str
 	logger.Info("job completed", "id", jobID)
 }
 
+// handleFailure는 작업 실패 시 재시도 또는 최종 실패(dead) 처리를 수행한다.
+// 최대 재시도 횟수를 초과하면 dead 상태로 전환하고, 그렇지 않으면 지수 백오프로 재시도를 예약한다.
 func (p *Pool) handleFailure(ctx context.Context, job *model.Job, jobErr error) {
 	newRetryCount := job.RetryCount + 1
 
@@ -161,7 +181,9 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, jobErr error) 
 		return
 	}
 
+	// 재시도 상태로 전환하고 재시도 메트릭 기록
 	p.store.UpdateJobError(ctx, job.ID, model.StatusRetrying, newRetryCount, jobErr.Error())
+	metrics.RetriesTotal.WithLabelValues(job.Type).Inc()
 	retryAt := time.Now().Add(model.BackoffDuration(newRetryCount))
 	p.queue.Schedule(ctx, job.ID.String(), retryAt)
 	p.logger.Info("job scheduled for retry", "id", job.ID, "retry", newRetryCount, "retry_at", retryAt)
