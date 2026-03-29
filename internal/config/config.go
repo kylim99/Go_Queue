@@ -15,8 +15,9 @@ type Config struct {
 	APIKey          string
 	WorkerCount     int
 	JobTimeout      time.Duration
-	ShutdownTimeout time.Duration
-	LogLevel        string
+	ShutdownTimeout    time.Duration
+	LogLevel           string
+	LeaderPollInterval time.Duration
 }
 
 func Load() (*Config, error) {
@@ -38,7 +39,8 @@ func Load() (*Config, error) {
 		WorkerCount:     getEnvIntOrDefault("GOQUEUE_WORKER_COUNT", 10),
 		JobTimeout:      getEnvDurationOrDefault("GOQUEUE_JOB_TIMEOUT", 30*time.Second),
 		ShutdownTimeout: getEnvDurationOrDefault("GOQUEUE_SHUTDOWN_TIMEOUT", 30*time.Second),
-		LogLevel:        getEnvOrDefault("GOQUEUE_LOG_LEVEL", "info"),
+		LogLevel:           getEnvOrDefault("GOQUEUE_LOG_LEVEL", "info"),
+		LeaderPollInterval: getEnvDurationOrDefault("GOQUEUE_LEADER_POLL_INTERVAL", 2*time.Second),
 	}, nil
 }
 

@@ -7,16 +7,21 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/goqueue/internal/leader"
 	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/queue"
 	"github.com/goqueue/internal/storage"
 )
 
-func NewRouter(store *storage.PostgresStorage, q *queue.RedisQueue, apiKey string, logger *slog.Logger) http.Handler {
+func NewRouter(store *storage.PostgresStorage, q *queue.RedisQueue, apiKey string, elector *leader.LeaderElector, logger *slog.Logger) http.Handler {
 	h := NewHandler(store, q, logger)
 	r := chi.NewRouter()
 
 	r.Use(RequestLogger(logger))
+
+	// Health check 엔드포인트 (인증 불필요)
+	r.Get("/health", HealthHandler())
+	r.Get("/ready", ReadyHandler(elector, store))
 
 	// Prometheus 메트릭 엔드포인트 (인증 불필요)
 	r.Handle("/metrics", promhttp.HandlerFor(

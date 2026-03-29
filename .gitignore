@@ -1,3 +1,4 @@
 .planning/
-CLAUDE.md
-goqueue/PERFORMANCE.md
+*.md
+!README.md
+.DS_Store

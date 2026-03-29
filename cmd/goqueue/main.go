@@ -11,6 +11,7 @@ import (
 
 	"github.com/goqueue/internal/api"
 	"github.com/goqueue/internal/config"
+	"github.com/goqueue/internal/leader"
 	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/queue"
 	"github.com/goqueue/internal/scheduler"
@@ -70,7 +71,22 @@ func main() {
 	pool.Start(ctx, queues)
 
 	sched := scheduler.New(store, rq, cfg.JobTimeout, logger)
-	sched.Start(ctx)
+
+	// 리더 선출기 생성: 리더 획득 시 스케줄러 시작, 해제 시 중지
+	elector := leader.New(
+		cfg.PostgresURL,
+		cfg.LeaderPollInterval,
+		func() { sched.Start(ctx) }, // onAcquire: 스케줄러 시작
+		func() { sched.Stop() },     // onRelease: 스케줄러 중지
+		logger,
+	)
+
+	// 리더 선출 루프를 별도 고루틴에서 시작
+	go func() {
+		if err := elector.Start(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("leader election failed", "error", err)
+		}
+	}()
 
 	// DB 커넥션 풀 메트릭 수집 고루틴 시작
 	go func() {
@@ -109,7 +125,7 @@ func main() {
 		}
 	}()
 
-	router := api.NewRouter(store, rq, cfg.APIKey, logger)
+	router := api.NewRouter(store, rq, cfg.APIKey, elector, logger)
 
 	srv := &http.Server{
 		Addr:    cfg.HTTPAddr,
@@ -130,6 +146,9 @@ func main() {
 	logger.Info("shutting down...")
 
 	cancel()
+
+	// 리더 선출 중지 및 advisory lock 해제
+	elector.Stop()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer shutdownCancel()

@@ -6,4 +6,4 @@ scrape_configs:
   - job_name: 'goqueue'
     scrape_interval: 5s
     static_configs:
-      - targets: ['app:8080']
+      - targets: ['app-1:8080', 'app-2:8080']

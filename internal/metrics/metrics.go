@@ -123,3 +123,22 @@ var DBPoolTotal = promauto.With(Registry).NewGauge(
 		Help:      "Total number of database connections in the pool",
 	},
 )
+
+// LeaderStatus는 현재 인스턴스의 리더 상태를 나타내는 게이지이다 (1=리더, 0=대기).
+var LeaderStatus = promauto.With(Registry).NewGauge(
+	prometheus.GaugeOpts{
+		Namespace: "goqueue",
+		Name:      "leader_status",
+		Help:      "Whether this instance is the leader (1) or standby (0)",
+	},
+)
+
+// LeaderElectionsTotal은 리더 선출 시도 횟수를 추적하는 카운터이다.
+var LeaderElectionsTotal = promauto.With(Registry).NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "goqueue",
+		Name:      "leader_elections_total",
+		Help:      "Total number of leader election attempts",
+	},
+	[]string{"result"},
+)
