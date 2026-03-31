@@ -1,0 +1,36 @@
+{{define "stats"}}
+<div id="stats-panel" class="stats" hx-swap-oob="true">
+    <div class="stat-card">
+        <h3>Pending</h3>
+        <div class="value">{{index . "pending"}}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Running</h3>
+        <div class="value">{{index . "running"}}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Completed</h3>
+        <div class="value">{{index . "completed"}}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Failed</h3>
+        <div class="value">{{index . "failed"}}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Retrying</h3>
+        <div class="value">{{index . "retrying"}}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Dead</h3>
+        <div class="value">{{index . "dead"}}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Scheduled</h3>
+        <div class="value">{{index . "scheduled"}}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Cancelled</h3>
+        <div class="value">{{index . "cancelled"}}</div>
+    </div>
+</div>
+{{end}}

@@ -76,6 +76,11 @@ func (q *RedisQueue) Schedule(ctx context.Context, jobID string, runAt time.Time
 	}).Err()
 }
 
+// Client는 내부 Redis 클라이언트를 반환한다. Pub/Sub 등 직접 접근이 필요할 때 사용한다.
+func (q *RedisQueue) Client() *redis.Client {
+	return q.client
+}
+
 // GetDueJobs는 실행 시간이 도래한 예약 작업을 원자적으로 조회하고 제거한다.
 func (q *RedisQueue) GetDueJobs(ctx context.Context, now time.Time) ([]string, error) {
 	max := fmt.Sprintf("%d", now.Unix())

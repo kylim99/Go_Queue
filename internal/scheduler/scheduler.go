@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/goqueue/internal/dashboard"
 	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/model"
 	"github.com/goqueue/internal/queue"
@@ -15,23 +17,25 @@ import (
 )
 
 type Scheduler struct {
-	store      *storage.PostgresStorage
-	queue      *queue.RedisQueue
-	jobTimeout time.Duration
-	logger     *slog.Logger
-	mu         sync.Mutex         // Start/Stop 동기화를 위한 뮤텍스
-	running    bool               // 현재 실행 중 여부
-	ctx        context.Context    // 현재 실행 컨텍스트
-	cancel     context.CancelFunc // 실행 컨텍스트 취소 함수
-	wg         sync.WaitGroup     // 루프 종료 대기를 위한 WaitGroup
+	store       *storage.PostgresStorage
+	queue       *queue.RedisQueue
+	jobTimeout  time.Duration
+	redisClient *redis.Client
+	logger      *slog.Logger
+	mu          sync.Mutex         // Start/Stop 동기화를 위한 뮤텍스
+	running     bool               // 현재 실행 중 여부
+	ctx         context.Context    // 현재 실행 컨텍스트
+	cancel      context.CancelFunc // 실행 컨텍스트 취소 함수
+	wg          sync.WaitGroup     // 루프 종료 대기를 위한 WaitGroup
 }
 
-func New(store *storage.PostgresStorage, q *queue.RedisQueue, jobTimeout time.Duration, logger *slog.Logger) *Scheduler {
+func New(store *storage.PostgresStorage, q *queue.RedisQueue, jobTimeout time.Duration, redisClient *redis.Client, logger *slog.Logger) *Scheduler {
 	return &Scheduler{
-		store:      store,
-		queue:      q,
-		jobTimeout: jobTimeout,
-		logger:     logger,
+		store:       store,
+		queue:       q,
+		jobTimeout:  jobTimeout,
+		redisClient: redisClient,
+		logger:      logger,
 	}
 }
 
@@ -116,6 +120,7 @@ func (s *Scheduler) processScheduledJobs(ctx context.Context) {
 			s.store.UpdateJobStatus(ctx, job.ID, model.StatusPending)
 		}
 
+		s.publishEvent(ctx, "job.enqueued", job)
 		s.logger.Debug("scheduled job enqueued", "id", jobIDStr, "queue", job.Queue)
 	}
 }
@@ -175,6 +180,20 @@ func (s *Scheduler) recoverStaleJobs(ctx context.Context) {
 
 	for _, job := range jobs {
 		s.store.UpdateJobError(ctx, job.ID, model.StatusFailed, job.RetryCount, "job timed out (stale)")
+		s.publishEvent(ctx, "job.stale_recovered", job)
 		s.logger.Warn("recovered stale job", "id", job.ID)
+	}
+}
+
+// publishEvent는 작업 상태 변경 이벤트를 Redis Pub/Sub으로 발행한다.
+func (s *Scheduler) publishEvent(ctx context.Context, eventType string, job *model.Job) {
+	event := dashboard.JobEvent{
+		Type:   eventType,
+		JobID:  job.ID.String(),
+		Queue:  job.Queue,
+		Status: string(job.Status),
+	}
+	if err := dashboard.PublishJobEvent(ctx, s.redisClient, event); err != nil {
+		s.logger.Error("publish job event failed", "type", eventType, "id", job.ID, "error", err)
 	}
 }

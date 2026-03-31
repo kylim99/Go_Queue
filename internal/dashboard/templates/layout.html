@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoQueue Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.8/dist/htmx.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/htmx-ext-ws@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; color: #333; padding: 2rem; }
+        h1 { margin-bottom: 1.5rem; }
+        h2 { font-size: 1.25rem; margin-bottom: 1rem; }
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
+        .stat-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 150px; }
+        .stat-card h3 { font-size: 0.875rem; color: #666; text-transform: uppercase; }
+        .stat-card .value { font-size: 2rem; font-weight: bold; margin-top: 0.5rem; }
+        table { width: 100%; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-collapse: collapse; margin-bottom: 1rem; }
+        th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; font-size: 0.875rem; text-transform: uppercase; color: #666; }
+        .status { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-running { background: #dbeafe; color: #1e40af; }
+        .status-completed { background: #d1fae5; color: #065f46; }
+        .status-failed { background: #fee2e2; color: #991b1b; }
+        .status-dead { background: #f3f4f6; color: #374151; }
+        .status-retrying { background: #fde68a; color: #92400e; }
+        .status-cancelled { background: #e5e7eb; color: #6b7280; }
+        .status-scheduled { background: #e0e7ff; color: #3730a3; }
+        .create-form { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 2rem; }
+        .create-form h2 { font-size: 1.125rem; margin-bottom: 1rem; }
+        .form-row { display: flex; gap: 1rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+        .form-group { display: flex; flex-direction: column; min-width: 150px; flex: 1; }
+        .form-group label { font-size: 0.75rem; color: #666; text-transform: uppercase; margin-bottom: 0.25rem; }
+        .form-group input, .form-group textarea { padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.875rem; font-family: inherit; }
+        .form-group textarea { resize: vertical; min-height: 60px; }
+        .btn { padding: 0.5rem 1rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600; display: inline-block; }
+        .btn:hover { background: #1d4ed8; }
+        .toast { position: fixed; top: 1rem; right: 1rem; padding: 0.75rem 1.25rem; border-radius: 6px; font-size: 0.875rem; font-weight: 500; display: none; z-index: 100; }
+        .toast-success { background: #d1fae5; color: #065f46; }
+        .toast-error { background: #fee2e2; color: #991b1b; }
+        .status-indicator { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.375rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+        .status-indicator::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+        .status-indicator.connected { background: #d1fae5; color: #065f46; }
+        .status-indicator.connected::before { background: #10b981; }
+        .status-indicator.disconnected { background: #fee2e2; color: #991b1b; }
+        .status-indicator.disconnected::before { background: #ef4444; }
+        .section { margin-bottom: 2rem; }
+        .charts-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+        .chart-container { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+        /* Tab navigation */
+        .tab-nav { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 2px solid #e5e7eb; }
+        .tab-btn { padding: 0.75rem 1.5rem; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; cursor: pointer; font-size: 0.9375rem; font-weight: 600; color: #6b7280; transition: all 0.15s; }
+        .tab-btn:hover { color: #2563eb; }
+        .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+
+        /* Filter bar */
+        .filter-bar { display: flex; gap: 1rem; align-items: flex-end; margin-bottom: 1rem; flex-wrap: wrap; background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .filter-group { display: flex; flex-direction: column; }
+        .filter-group label { font-size: 0.75rem; color: #666; text-transform: uppercase; margin-bottom: 0.25rem; }
+        .filter-group select, .filter-group input { padding: 0.5rem; border: 1px solid #ddd; border-radius: 4px; font-size: 0.875rem; min-width: 140px; }
+        .btn-filter { background: #4b5563; }
+        .btn-filter:hover { background: #374151; }
+
+        /* Pagination */
+        .pagination { display: flex; align-items: center; gap: 1rem; justify-content: center; margin-top: 1rem; }
+        .page-info { font-size: 0.875rem; color: #666; }
+        .btn-page { background: #6b7280; padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+        .btn-page:hover { background: #4b5563; }
+
+        /* Action buttons */
+        .action-buttons { display: flex; gap: 0.375rem; }
+        .btn-detail { background: #6366f1; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+        .btn-detail:hover { background: #4f46e5; }
+        .btn-retry { background: #2563eb; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+        .btn-retry:hover { background: #1d4ed8; }
+        .btn-cancel { background: #d97706; color: white; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+        .btn-cancel:hover { background: #b45309; }
+        .btn-delete { background: #dc2626; color: white; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+        .btn-delete:hover { background: #b91c1c; }
+        .btn-close { background: #6b7280; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+        .btn-close:hover { background: #4b5563; }
+
+        /* Truncated text */
+        .truncated { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* Job detail panel */
+        #job-detail { margin-bottom: 2rem; }
+        .job-detail-panel { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .detail-header h3 { font-size: 1.125rem; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+        .detail-item label { font-size: 0.75rem; color: #666; text-transform: uppercase; display: block; margin-bottom: 0.25rem; }
+        .detail-item span { font-size: 0.9375rem; }
+        .detail-payload, .detail-error { margin-bottom: 1rem; }
+        .detail-payload label, .detail-error label { font-size: 0.75rem; color: #666; text-transform: uppercase; display: block; margin-bottom: 0.25rem; }
+        .detail-payload pre, .detail-error pre { background: #f8f9fa; padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.8125rem; }
+        .detail-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+
+        /* DLQ header */
+        .dlq-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+
+        /* Tab content visibility */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body hx-ext="ws" ws-connect="/ws">
+    <div class="header">
+        <h1>GoQueue Dashboard</h1>
+        <div id="ws-status" class="status-indicator disconnected">Disconnected</div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <div class="create-form">
+        <h2>Create Job</h2>
+        <form id="createJobForm">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Queue</label>
+                    <input type="text" id="queue" value="default" required>
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <input type="text" id="jobtype" placeholder="e.g. send_email" required>
+                </div>
+                <div class="form-group">
+                    <label>Max Retries</label>
+                    <input type="number" id="maxRetries" value="3" min="0">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Payload (JSON)</label>
+                    <textarea id="payload" placeholder='{"key": "value"}'>{}</textarea>
+                </div>
+            </div>
+            <button type="submit" class="btn">Create Job</button>
+        </form>
+    </div>
+
+    {{template "stats" .Stats}}
+
+    <div class="tab-nav">
+        <button class="tab-btn active" onclick="switchTab('jobs')">Jobs</button>
+        <button class="tab-btn" onclick="switchTab('dlq')">Dead Letter Queue</button>
+    </div>
+
+    <div id="tab-jobs" class="tab-content active">
+        {{template "job_list" .JobListData}}
+        <div id="job-detail"></div>
+    </div>
+
+    <div id="tab-dlq" class="tab-content">
+        {{template "dlq" .DLQData}}
+    </div>
+
+    <div id="charts-panel" class="charts-panel">
+        {{template "charts" .ChartData}}
+    </div>
+
+    <script>
+        // Chart.js 인스턴스 (전역, OOB swap에도 유지)
+        var throughputChart = null;
+        var errorChart = null;
+        var MAX_DATA_POINTS = 60;
+
+        function initCharts() {
+            var tEl = document.getElementById('throughputChart');
+            var eEl = document.getElementById('errorChart');
+            if (!tEl || !eEl) return;
+
+            if (throughputChart) { throughputChart.destroy(); }
+            if (errorChart) { errorChart.destroy(); }
+
+            throughputChart = new Chart(tEl.getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [{ label: 'Completed', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.1, fill: true }] },
+                options: { responsive: true, scales: { x: { title: { display: true, text: 'Time' } }, y: { beginAtZero: true, title: { display: true, text: 'Jobs' } } } }
+            });
+
+            errorChart = new Chart(eEl.getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { label: 'Failed', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.1, fill: true },
+                    { label: 'Dead', data: [], borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.1)', tension: 0.1, fill: true }
+                ] },
+                options: { responsive: true, scales: { x: { title: { display: true, text: 'Time' } }, y: { beginAtZero: true, title: { display: true, text: 'Jobs' } } } }
+            });
+
+            applyChartData();
+        }
+
+        function applyChartData() {
+            var el = document.getElementById('chart-data');
+            if (!el || !el.dataset.chart || !throughputChart) return;
+            try {
+                var data = JSON.parse(el.dataset.chart);
+                throughputChart.data.labels = (data.labels || []).slice(-MAX_DATA_POINTS);
+                throughputChart.data.datasets[0].data = (data.completed || []).slice(-MAX_DATA_POINTS);
+                throughputChart.update();
+                errorChart.data.labels = (data.labels || []).slice(-MAX_DATA_POINTS);
+                errorChart.data.datasets[0].data = (data.failed || []).slice(-MAX_DATA_POINTS);
+                errorChart.data.datasets[1].data = (data.dead || []).slice(-MAX_DATA_POINTS);
+                errorChart.update();
+            } catch(e) { console.error('chart update error:', e); }
+        }
+
+        // chart-data 변경 감지
+        var chartObserver = new MutationObserver(function() { applyChartData(); });
+        function watchChartData() {
+            var el = document.getElementById('chart-data');
+            if (el) chartObserver.observe(el, { attributes: true, attributeFilter: ['data-chart'] });
+        }
+
+        // charts-container가 OOB swap으로 교체될 때 차트 재초기화
+        document.body.addEventListener('htmx:oobAfterSwap', function(e) {
+            if (e.detail.target && e.detail.target.id === 'charts-container') {
+                setTimeout(initCharts, 50);
+            }
+            if (e.detail.target && e.detail.target.id === 'chart-data') {
+                watchChartData();
+                applyChartData();
+            }
+        });
+
+        // 초기 로드
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+            watchChartData();
+        });
+    </script>
+
+    <script>
+        const API_KEY = "{{.APIKey}}";
+
+        function showToast(msg, type) {
+            var t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = 'toast toast-' + type;
+            t.style.display = 'block';
+            setTimeout(function() { t.style.display = 'none'; }, 3000);
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(function(btn) { btn.classList.remove('active'); });
+            document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+            if (tab === 'jobs') {
+                document.querySelector('.tab-btn:nth-child(1)').classList.add('active');
+                document.getElementById('tab-jobs').classList.add('active');
+            } else {
+                document.querySelector('.tab-btn:nth-child(2)').classList.add('active');
+                document.getElementById('tab-dlq').classList.add('active');
+            }
+        }
+
+        function bulkReprocess() {
+            var rows = document.querySelectorAll('#dlq-body tr[data-job-id]');
+            var count = 0;
+            rows.forEach(function(row) {
+                var jobId = row.getAttribute('data-job-id');
+                fetch('/api/v1/jobs/' + jobId + '/retry', {
+                    method: 'POST',
+                    headers: { 'X-API-Key': API_KEY }
+                }).then(function(res) {
+                    if (res.ok) count++;
+                }).catch(function() {});
+            });
+            showToast('Reprocessing ' + rows.length + ' dead jobs...', 'success');
+        }
+
+        // WebSocket 연결 상태 이벤트 핸들링
+        document.body.addEventListener('htmx:wsOpen', function() {
+            var el = document.getElementById('ws-status');
+            el.className = 'status-indicator connected';
+            el.textContent = 'Connected';
+        });
+        document.body.addEventListener('htmx:wsClose', function() {
+            var el = document.getElementById('ws-status');
+            el.className = 'status-indicator disconnected';
+            el.textContent = 'Disconnected';
+        });
+
+        document.getElementById('createJobForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var queueVal = document.getElementById('queue').value;
+            var typeVal = document.getElementById('jobtype').value;
+            var maxRetries = parseInt(document.getElementById('maxRetries').value);
+            var payload;
+            try {
+                payload = JSON.parse(document.getElementById('payload').value);
+            } catch(err) {
+                showToast('Invalid JSON payload', 'error');
+                return;
+            }
+
+            fetch('/api/v1/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+                body: JSON.stringify({ queue: queueVal, type: typeVal, payload: payload, max_retries: maxRetries })
+            }).then(function(res) {
+                return res.json().then(function(data) {
+                    if (res.ok) {
+                        showToast('Job created: ' + data.id, 'success');
+                    } else {
+                        showToast('Error: ' + data.error, 'error');
+                    }
+                });
+            }).catch(function(err) {
+                showToast('Request failed: ' + err.message, 'error');
+            });
+        });
+    </script>
+</body>
+</html>

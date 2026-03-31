@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/goqueue/internal/dashboard"
 	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/model"
 	"github.com/goqueue/internal/queue"
@@ -41,25 +43,27 @@ func (r *Registry) Get(jobType string) (Handler, bool) {
 }
 
 type Pool struct {
-	store      *storage.PostgresStorage
-	queue      *queue.RedisQueue
-	registry   *Registry
-	queues     []string
-	count      int
-	jobTimeout time.Duration
-	logger     *slog.Logger
-	wg         sync.WaitGroup
-	cancel     context.CancelFunc
+	store       *storage.PostgresStorage
+	queue       *queue.RedisQueue
+	registry    *Registry
+	queues      []string
+	count       int
+	jobTimeout  time.Duration
+	redisClient *redis.Client
+	logger      *slog.Logger
+	wg          sync.WaitGroup
+	cancel      context.CancelFunc
 }
 
-func NewPool(store *storage.PostgresStorage, q *queue.RedisQueue, registry *Registry, count int, jobTimeout time.Duration, logger *slog.Logger) *Pool {
+func NewPool(store *storage.PostgresStorage, q *queue.RedisQueue, registry *Registry, count int, jobTimeout time.Duration, redisClient *redis.Client, logger *slog.Logger) *Pool {
 	return &Pool{
-		store:      store,
-		queue:      q,
-		registry:   registry,
-		count:      count,
-		jobTimeout: jobTimeout,
-		logger:     logger,
+		store:       store,
+		queue:       q,
+		registry:    registry,
+		count:       count,
+		jobTimeout:  jobTimeout,
+		redisClient: redisClient,
+		logger:      logger,
 	}
 }
 
@@ -141,6 +145,7 @@ func (p *Pool) processJob(ctx context.Context, logger *slog.Logger, jobIDStr str
 		logger.Error("update status to running failed", "id", jobID, "error", err)
 		return
 	}
+	p.publishEvent(ctx, "job.running", job)
 
 	jobCtx, cancel := context.WithTimeout(ctx, p.jobTimeout)
 	defer cancel()
@@ -167,6 +172,7 @@ func (p *Pool) processJob(ctx context.Context, logger *slog.Logger, jobIDStr str
 	if err := p.store.UpdateJobStatus(ctx, jobID, model.StatusCompleted); err != nil {
 		logger.Error("update status to completed failed", "id", jobID, "error", err)
 	}
+	p.publishEvent(ctx, "job.completed", job)
 	logger.Info("job completed", "id", jobID)
 }
 
@@ -177,14 +183,29 @@ func (p *Pool) handleFailure(ctx context.Context, job *model.Job, jobErr error) 
 
 	if newRetryCount >= job.MaxRetries {
 		p.store.UpdateJobError(ctx, job.ID, model.StatusDead, newRetryCount, jobErr.Error())
+		p.publishEvent(ctx, "job.dead", job)
 		p.logger.Warn("job is dead", "id", job.ID, "retries", newRetryCount)
 		return
 	}
 
 	// 재시도 상태로 전환하고 재시도 메트릭 기록
 	p.store.UpdateJobError(ctx, job.ID, model.StatusRetrying, newRetryCount, jobErr.Error())
+	p.publishEvent(ctx, "job.retrying", job)
 	metrics.RetriesTotal.WithLabelValues(job.Type).Inc()
 	retryAt := time.Now().Add(model.BackoffDuration(newRetryCount))
 	p.queue.Schedule(ctx, job.ID.String(), retryAt)
 	p.logger.Info("job scheduled for retry", "id", job.ID, "retry", newRetryCount, "retry_at", retryAt)
+}
+
+// publishEvent는 작업 상태 변경 이벤트를 Redis Pub/Sub으로 발행한다.
+func (p *Pool) publishEvent(ctx context.Context, eventType string, job *model.Job) {
+	event := dashboard.JobEvent{
+		Type:   eventType,
+		JobID:  job.ID.String(),
+		Queue:  job.Queue,
+		Status: string(job.Status),
+	}
+	if err := dashboard.PublishJobEvent(ctx, p.redisClient, event); err != nil {
+		p.logger.Error("publish job event failed", "type", eventType, "id", job.ID, "error", err)
+	}
 }

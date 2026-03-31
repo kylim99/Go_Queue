@@ -1,8 +1,20 @@
 package main
 
+// @title GoQueue API
+// @version 2.0
+// @description 분산 작업 큐 시스템 GoQueue의 REST API
+// @host localhost:8080
+// @BasePath /api/v1
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-API-Key
+
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,6 +23,7 @@ import (
 
 	"github.com/goqueue/internal/api"
 	"github.com/goqueue/internal/config"
+	"github.com/goqueue/internal/dashboard"
 	"github.com/goqueue/internal/leader"
 	"github.com/goqueue/internal/metrics"
 	"github.com/goqueue/internal/queue"
@@ -61,16 +74,37 @@ func main() {
 	}
 	defer rq.Close()
 
+	// WebSocket Hub 및 대시보드 렌더러 생성
+	hub := dashboard.NewHub(logger)
+	go hub.Run(ctx)
+	renderer := dashboard.NewTemplateRenderer(store, cfg.APIKey)
+	go dashboard.StartSubscriber(ctx, rq.Client(), hub, renderer, logger)
+
 	registry := worker.NewRegistry()
-	// Register job handlers here. Example:
-	// registry.Register("send_email", emailHandler)
+	// 데모 핸들러 등록: 각 작업 타입별로 간단한 처리 로직
+	demoHandler := func(ctx context.Context, payload json.RawMessage) error {
+		time.Sleep(time.Duration(100+rand.Intn(400)) * time.Millisecond)
+		return nil
+	}
+	// 10% 확률로 실패하는 핸들러 (에러 시나리오 테스트용)
+	flakyHandler := func(ctx context.Context, payload json.RawMessage) error {
+		time.Sleep(time.Duration(100+rand.Intn(400)) * time.Millisecond)
+		if rand.Intn(10) == 0 {
+			return fmt.Errorf("random failure for testing")
+		}
+		return nil
+	}
+	registry.Register("process", demoHandler)
+	registry.Register("send_email", flakyHandler)
+	registry.Register("push_notify", demoHandler)
+	registry.Register("generate_report", flakyHandler)
 
-	queues := []string{"default", "email"}
+	queues := []string{"default", "email", "notification", "report"}
 
-	pool := worker.NewPool(store, rq, registry, cfg.WorkerCount, cfg.JobTimeout, logger)
+	pool := worker.NewPool(store, rq, registry, cfg.WorkerCount, cfg.JobTimeout, rq.Client(), logger)
 	pool.Start(ctx, queues)
 
-	sched := scheduler.New(store, rq, cfg.JobTimeout, logger)
+	sched := scheduler.New(store, rq, cfg.JobTimeout, rq.Client(), logger)
 
 	// 리더 선출기 생성: 리더 획득 시 스케줄러 시작, 해제 시 중지
 	elector := leader.New(
@@ -125,7 +159,7 @@ func main() {
 		}
 	}()
 
-	router := api.NewRouter(store, rq, cfg.APIKey, elector, logger)
+	router := api.NewRouter(store, rq, cfg.APIKey, elector, hub, renderer, logger)
 
 	srv := &http.Server{
 		Addr:    cfg.HTTPAddr,
@@ -146,6 +180,9 @@ func main() {
 	logger.Info("shutting down...")
 
 	cancel()
+
+	// WebSocket Hub 종료
+	hub.Shutdown()
 
 	// 리더 선출 중지 및 advisory lock 해제
 	elector.Stop()

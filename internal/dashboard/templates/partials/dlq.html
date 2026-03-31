@@ -1,0 +1,49 @@
+{{define "dlq"}}
+<div id="dlq-panel" hx-swap-oob="true" class="section">
+    <div class="dlq-header">
+        <h2>Dead Letter Queue ({{len .Jobs}})</h2>
+        {{if .Jobs}}
+        <button class="btn btn-retry" onclick="bulkReprocess()">Reprocess All</button>
+        {{end}}
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Queue</th>
+                <th>Type</th>
+                <th>Retries</th>
+                <th>Error</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="dlq-body">
+            {{range .Jobs}}
+            <tr data-job-id="{{.ID}}">
+                <td class="truncated" title="{{.ID}}">{{printf "%.8s" .ID.String}}</td>
+                <td>{{.Queue}}</td>
+                <td>{{.Type}}</td>
+                <td>{{.RetryCount}}/{{.MaxRetries}}</td>
+                <td class="truncated" title="{{.Error}}">{{if .Error}}{{printf "%.50s" .Error}}{{else}}-{{end}}</td>
+                <td>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+                <td class="action-buttons">
+                    <button class="btn btn-retry"
+                        hx-post="/api/v1/jobs/{{.ID}}/retry"
+                        hx-headers='{"X-API-Key":"{{$.APIKey}}"}'
+                        hx-swap="none">Reprocess</button>
+                    <button class="btn btn-delete"
+                        hx-delete="/api/v1/jobs/{{.ID}}"
+                        hx-headers='{"X-API-Key":"{{$.APIKey}}"}'
+                        hx-swap="none"
+                        hx-confirm="Are you sure you want to delete this job?">Delete</button>
+                </td>
+            </tr>
+            {{else}}
+            <tr><td colspan="7" style="text-align:center;color:#999;">No dead jobs</td></tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}

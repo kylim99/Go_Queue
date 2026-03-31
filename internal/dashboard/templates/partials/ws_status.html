@@ -1,0 +1,5 @@
+{{define "ws_status"}}
+<div id="ws-status" class="status-indicator {{if .}}connected{{else}}disconnected{{end}}" hx-swap-oob="true">
+    {{if .}}Connected{{else}}Disconnected{{end}}
+</div>
+{{end}}

@@ -1,0 +1,376 @@
+basePath: /api/v1
+definitions:
+  github_com_goqueue_internal_model.Job:
+    properties:
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      error:
+        type: string
+      id:
+        type: string
+      max_retries:
+        type: integer
+      payload:
+        items:
+          type: integer
+        type: array
+      queue:
+        type: string
+      retry_count:
+        type: integer
+      run_at:
+        type: string
+      started_at:
+        type: string
+      status:
+        $ref: '#/definitions/github_com_goqueue_internal_model.JobStatus'
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  github_com_goqueue_internal_model.JobStatus:
+    enum:
+    - pending
+    - scheduled
+    - running
+    - completed
+    - failed
+    - retrying
+    - dead
+    - cancelled
+    type: string
+    x-enum-varnames:
+    - StatusPending
+    - StatusScheduled
+    - StatusRunning
+    - StatusCompleted
+    - StatusFailed
+    - StatusRetrying
+    - StatusDead
+    - StatusCancelled
+  internal_api.CreateJobRequest:
+    properties:
+      max_retries:
+        type: integer
+      payload:
+        items:
+          type: integer
+        type: array
+      queue:
+        type: string
+      run_at:
+        type: string
+      type:
+        type: string
+    type: object
+  internal_api.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  internal_api.PaginatedResponse:
+    properties:
+      data: {}
+      pagination:
+        $ref: '#/definitions/internal_api.Pagination'
+    type: object
+  internal_api.Pagination:
+    properties:
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: 분산 작업 큐 시스템 GoQueue의 REST API
+  title: GoQueue API
+  version: "2.0"
+paths:
+  /jobs:
+    get:
+      description: 필터와 페이지네이션으로 작업 목록을 조회한다.
+      parameters:
+      - description: 상태 필터 (pending, running, completed, failed, dead, cancelled)
+        in: query
+        name: status
+        type: string
+      - description: 큐 필터
+        in: query
+        name: queue
+        type: string
+      - description: 작업 유형 필터
+        in: query
+        name: type
+        type: string
+      - default: 1
+        description: 페이지 번호
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 페이지 크기
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 작업 목록
+          schema:
+            $ref: '#/definitions/internal_api.PaginatedResponse'
+        "500":
+          description: 서버 에러
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 작업 목록 조회
+      tags:
+      - jobs
+    post:
+      consumes:
+      - application/json
+      description: 지정된 큐에 새 작업을 생성한다. run_at을 지정하면 예약 작업이 된다.
+      parameters:
+      - description: 작업 생성 요청
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api.CreateJobRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 생성된 작업
+          schema:
+            $ref: '#/definitions/github_com_goqueue_internal_model.Job'
+        "400":
+          description: 잘못된 요청
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "500":
+          description: 서버 에러
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 새 작업 생성
+      tags:
+      - jobs
+  /jobs/{id}:
+    delete:
+      description: dead 상태의 작업을 영구 삭제한다. dead 상태가 아닌 작업은 삭제할 수 없다.
+      parameters:
+      - description: 작업 ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 삭제 결과
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 잘못된 ID
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: dead 상태가 아님
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Dead 작업 삭제
+      tags:
+      - jobs
+    get:
+      description: ID로 작업의 상세 정보를 조회한다.
+      parameters:
+      - description: 작업 ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 작업 상세
+          schema:
+            $ref: '#/definitions/github_com_goqueue_internal_model.Job'
+        "400":
+          description: 잘못된 ID
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: 작업 없음
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 작업 상세 조회
+      tags:
+      - jobs
+  /jobs/{id}/cancel:
+    post:
+      description: 대기/예약 중인 작업을 취소한다.
+      parameters:
+      - description: 작업 ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 취소 결과
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 잘못된 ID
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: 작업 없음
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: 취소 불가 상태
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 작업 취소
+      tags:
+      - jobs
+  /jobs/{id}/retry:
+    post:
+      description: dead 상태의 작업을 다시 pending으로 변경하여 재시도한다.
+      parameters:
+      - description: 작업 ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 재시도 결과
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: 잘못된 ID
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "404":
+          description: 작업 없음
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+        "409":
+          description: dead 상태가 아님
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Dead 작업 재시도
+      tags:
+      - jobs
+  /queues:
+    get:
+      description: 모든 큐의 상태별 작업 수를 조회한다.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 큐별 상태 통계
+          schema:
+            additionalProperties:
+              additionalProperties:
+                type: integer
+              type: object
+            type: object
+        "500":
+          description: 서버 에러
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 전체 큐 통계 조회
+      tags:
+      - queues
+  /queues/{name}:
+    get:
+      description: 지정된 큐의 상태별 작업 수를 조회한다.
+      parameters:
+      - description: 큐 이름
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 상태별 작업 수
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+        "500":
+          description: 서버 에러
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 특정 큐 통계 조회
+      tags:
+      - queues
+  /stats:
+    get:
+      description: 전체 작업의 상태별 합계를 조회한다.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 상태별 합계
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+        "500":
+          description: 서버 에러
+          schema:
+            $ref: '#/definitions/internal_api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 전체 작업 통계 조회
+      tags:
+      - stats
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: X-API-Key
+    type: apiKey
+swagger: "2.0"

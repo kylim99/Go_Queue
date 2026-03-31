@@ -33,6 +33,12 @@ type QueueStat struct {
 	Count  int    `json:"count"`
 }
 
+type TimeSeriesStat struct {
+	Bucket time.Time `json:"bucket"`
+	Status string    `json:"status"`
+	Count  int       `json:"count"`
+}
+
 type PostgresStorage struct {
 	pool    *pgxpool.Pool
 	connStr string
@@ -284,6 +290,45 @@ func (s *PostgresStorage) GetQueueStatsByName(ctx context.Context, queueName str
 		stats = append(stats, qs)
 	}
 	return stats, nil
+}
+
+// DeleteJob은 dead 상태의 작업을 삭제한다. dead 상태가 아닌 작업은 삭제하지 않는다.
+func (s *PostgresStorage) DeleteJob(ctx context.Context, id uuid.UUID) error {
+	result, err := s.pool.Exec(ctx,
+		`DELETE FROM jobs WHERE id = $1 AND status = 'dead'`, id,
+	)
+	if err != nil {
+		return fmt.Errorf("delete job: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("job not found or not in dead status")
+	}
+	return nil
+}
+
+// GetTimeSeries는 지정된 기간의 작업 완료/실패 추이를 시간 버킷별로 반환한다.
+func (s *PostgresStorage) GetTimeSeries(ctx context.Context, duration time.Duration, interval string) ([]TimeSeriesStat, error) {
+	query := `SELECT date_trunc($1, updated_at) AS bucket, status, COUNT(*) AS count
+	          FROM jobs
+	          WHERE updated_at > now() - $2::interval
+	            AND status IN ('completed', 'failed', 'dead')
+	          GROUP BY bucket, status
+	          ORDER BY bucket`
+	rows, err := s.pool.Query(ctx, query, interval, duration.String())
+	if err != nil {
+		return nil, fmt.Errorf("get time series: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []TimeSeriesStat
+	for rows.Next() {
+		var stat TimeSeriesStat
+		if err := rows.Scan(&stat.Bucket, &stat.Status, &stat.Count); err != nil {
+			return nil, fmt.Errorf("scan time series: %w", err)
+		}
+		stats = append(stats, stat)
+	}
+	return stats, rows.Err()
 }
 
 type scannable interface {

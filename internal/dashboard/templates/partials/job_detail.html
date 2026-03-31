@@ -1,0 +1,88 @@
+{{define "job_detail"}}
+<div class="job-detail-panel">
+    <div class="detail-header">
+        <h3>Job Detail</h3>
+        <button class="btn btn-close" onclick="document.getElementById('job-detail').innerHTML='';">Close</button>
+    </div>
+
+    <div class="detail-grid">
+        <div class="detail-item">
+            <label>ID</label>
+            <span>{{.ID}}</span>
+        </div>
+        <div class="detail-item">
+            <label>Queue</label>
+            <span>{{.Queue}}</span>
+        </div>
+        <div class="detail-item">
+            <label>Type</label>
+            <span>{{.Type}}</span>
+        </div>
+        <div class="detail-item">
+            <label>Status</label>
+            <span class="status status-{{.Status}}">{{.Status}}</span>
+        </div>
+        <div class="detail-item">
+            <label>Max Retries</label>
+            <span>{{.MaxRetries}}</span>
+        </div>
+        <div class="detail-item">
+            <label>Retry Count</label>
+            <span>{{.RetryCount}}</span>
+        </div>
+        <div class="detail-item">
+            <label>Created At</label>
+            <span>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</span>
+        </div>
+        <div class="detail-item">
+            <label>Updated At</label>
+            <span>{{.UpdatedAt.Format "2006-01-02 15:04:05"}}</span>
+        </div>
+        {{if .RunAt}}
+        <div class="detail-item">
+            <label>Run At</label>
+            <span>{{.RunAt.Format "2006-01-02 15:04:05"}}</span>
+        </div>
+        {{end}}
+        {{if .StartedAt}}
+        <div class="detail-item">
+            <label>Started At</label>
+            <span>{{.StartedAt.Format "2006-01-02 15:04:05"}}</span>
+        </div>
+        {{end}}
+        {{if .CompletedAt}}
+        <div class="detail-item">
+            <label>Completed At</label>
+            <span>{{.CompletedAt.Format "2006-01-02 15:04:05"}}</span>
+        </div>
+        {{end}}
+    </div>
+
+    {{if .Error}}
+    <div class="detail-error">
+        <label>Error</label>
+        <pre><code>{{.Error}}</code></pre>
+    </div>
+    {{end}}
+
+    <div class="detail-payload">
+        <label>Payload</label>
+        <pre><code>{{printf "%s" .Payload}}</code></pre>
+    </div>
+
+    <div class="detail-actions">
+        {{if eq (printf "%s" .Status) "dead"}}
+        <button class="btn btn-retry"
+            hx-post="/api/v1/jobs/{{.ID}}/retry"
+            hx-headers='{"X-API-Key":"{{$.APIKey}}"}'
+            hx-swap="none">Retry</button>
+        {{end}}
+        {{if or (eq (printf "%s" .Status) "pending") (eq (printf "%s" .Status) "running") (eq (printf "%s" .Status) "scheduled")}}
+        <button class="btn btn-cancel"
+            hx-post="/api/v1/jobs/{{.ID}}/cancel"
+            hx-headers='{"X-API-Key":"{{$.APIKey}}"}'
+            hx-swap="none">Cancel</button>
+        {{end}}
+    </div>
+</div>
+{{end}}

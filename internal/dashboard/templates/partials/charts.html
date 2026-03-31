@@ -1,0 +1,13 @@
+{{define "charts"}}
+<div id="charts-container" hx-swap-oob="true">
+    <div class="chart-container">
+        <h3>Throughput (Completed Jobs)</h3>
+        <canvas id="throughputChart" width="400" height="200"></canvas>
+    </div>
+    <div class="chart-container">
+        <h3>Errors (Failed / Dead Jobs)</h3>
+        <canvas id="errorChart" width="400" height="200"></canvas>
+    </div>
+</div>
+<div id="chart-data" hx-swap-oob="true" style="display:none" data-chart='{{.ChartJSON}}'></div>
+{{end}}
